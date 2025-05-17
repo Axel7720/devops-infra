@@ -1,0 +1,64 @@
+---
+- name: Setup Kubernetes Master Node
+  hosts: k8s_master
+  become: true
+
+  tasks:
+    - name: Disable swap
+      command: swapoff -a
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+        update_cache: true
+
+    - name: Enable and start Docker
+      systemd:
+        name: docker
+        enabled: true
+        state: started
+
+    - name: Download kubeadm, kubelet, and kubectl binaries
+      shell: |
+        curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubeadm"
+        curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubelet"
+        curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubeadm kubelet kubectl
+        mv kubeadm kubelet kubectl /usr/local/bin/
+      args:
+        chdir: /tmp
+
+    - name: Enable kubelet service
+      systemd:
+        name: kubelet
+        enabled: true
+        state: started
+
+    - name: Initialize Kubernetes Cluster
+      command: kubeadm init --pod-network-cidr=10.244.0.0/16
+      args:
+        creates: /etc/kubernetes/admin.conf
+
+    - name: Create .kube directory
+      file:
+        path: /home/ubuntu/.kube
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Copy kubeconfig
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ubuntu/.kube/config
+        remote_src: yes
+        owner: ubuntu
+        group: ubuntu
+        mode: '0644'
+
+    - name: Install Weave Net CNI
+      become: false
+      shell: |
+        export KUBECONFIG=/home/ubuntu/.kube/config
+        kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
